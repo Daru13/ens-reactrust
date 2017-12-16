@@ -1,0 +1,6 @@
+[package]
+name    = "reactrust"
+version = "0.1.0"
+authors = ["Daru13 <daru14@gmail.com>"]
+
+[dependencies]

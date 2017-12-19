@@ -1,4 +1,6 @@
 use continuations::Continuation;
+use signals::runtime::SignalRuntimeRef;
+
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // RUNTIME
@@ -6,7 +8,7 @@ use continuations::Continuation;
 
 /// Runtime for executing reactive continuations.
 pub struct Runtime {
-  // Pool of continuations to execute at different points in time
+  // Pools of continuations to execute at different points in time
   current_instant_tasks: Vec<Box<Continuation<()>>>,
   next_instant_tasks   : Vec<Box<Continuation<()>>>,
   end_of_instant_tasks : Vec<Box<Continuation<()>>>
@@ -69,6 +71,12 @@ impl Runtime {
       return false;
     }
 
+    println!("Current instant (cur: {}, endof: {}, next: {})",
+      self.current_instant_tasks.len(),
+      self.end_of_instant_tasks.len(),
+      self.next_instant_tasks.len()
+    );
+
     let task = self.current_instant_tasks.pop();
     match task {
       Some(continuation) => continuation.call_box(self, ()),
@@ -84,6 +92,12 @@ impl Runtime {
       return false;
     }
 
+    println!("End of instant (cur: {}, endof: {}, next: {})",
+      self.current_instant_tasks.len(),
+      self.end_of_instant_tasks.len(),
+      self.next_instant_tasks.len()
+    );
+
     let task = self.end_of_instant_tasks.pop();
     match task {
       Some(continuation) => continuation.call_box(self, ()),
@@ -95,6 +109,12 @@ impl Runtime {
 
   /// Registers a continuation to execute on the current instant.
   pub fn on_current_instant(&mut self, c: Box<Continuation<()>>) {
+    println!("On current instant (cur: {}, endof: {}, next: {})",
+      self.current_instant_tasks.len(),
+      self.end_of_instant_tasks.len(),
+      self.next_instant_tasks.len()
+    );
+
     self.current_instant_tasks.push(c);
   }
 
@@ -105,7 +125,13 @@ impl Runtime {
 
   /// Registers a continuation to execute at the end of the instant. Runtime calls for `c`
   /// behave as if they where executed during the next instant.
-  fn on_end_of_instant(&mut self, c: Box<Continuation<()>>) {
+  pub fn on_end_of_instant(&mut self, c: Box<Continuation<()>>) {
+    println!("On end of instant (cur: {}, endof: {}, next: {})",
+      self.current_instant_tasks.len(),
+      self.end_of_instant_tasks.len(),
+      self.next_instant_tasks.len()
+    );
+
     self.end_of_instant_tasks.push(c);
   }
 }

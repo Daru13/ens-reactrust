@@ -64,8 +64,17 @@ pub trait Process: 'static {
   }
 }
 
+/*
+pub fn execute_process_on_runtime<P, V>(process: P, runtime: &mut Runtime) -> V
+where
+  P: Process<Value = V>,
+  V: ::std::fmt::Debug + 'static
+{
 
-fn execute_process<P, V>(process: P) -> V
+}
+*/
+
+pub fn execute_process<P, V>(process: P) -> V
 where
   P: Process<Value = V>,
   V: ::std::fmt::Debug + 'static
@@ -85,9 +94,9 @@ where
   runtime.on_current_instant(Box::new(main_continuation));
   runtime.execute();
 
-  let x = return_value_clone.take().unwrap();
-  return x;
+  return_value_clone.take().unwrap()
 }
+
 
 
 /// A process returning a single value.
@@ -107,7 +116,7 @@ where
 }
 
 /// Returns a new value process built from the given value.
-fn value<V> (value: V) -> ValueProcess<V> {
+pub fn value<V> (value: V) -> ValueProcess<V> {
   ValueProcess { value: value }
 }
 
@@ -213,6 +222,7 @@ where
     let join_point_2 = join_point_1.clone();
 
     self.process_1.call(runtime, move |runtime: &mut Runtime, P1_result: P1::Value| {
+      println!("Running process 1 in JoinedProcess");
       let P2_result = join_point_1.P2_result.take();
 
       if P2_result.is_some() {
@@ -226,6 +236,7 @@ where
     });
 
     self.process_2.call(runtime, move |runtime: &mut Runtime, P2_result: P2::Value| {
+      println!("Running process 2 in JoinedProcess");
       let P1_result = join_point_2.P1_result.take();
 
       if P1_result.is_some() {

@@ -1,0 +1,18 @@
+signal s in
+loop
+  emit s;
+  pause;
+end
+||
+loop
+  present s then begin
+    print_endline "present";
+    pause;
+  end else print_endline "not present";
+end
+||
+loop
+  await immediate s;
+  print_endline "s received";
+  pause;
+end

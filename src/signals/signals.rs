@@ -34,6 +34,20 @@ where
   {
     Emit { signal: Box::new(self) }
   }
+
+  fn present<P1, P2, V>(self, process_if: P1, process_else: P2) -> Present<Self, P1, P2, V>
+  where
+    Self: Sized + 'static,
+    P1: Process<Value = V>,
+    P2: Process<Value = V>,
+    V: 'static
+  {
+    Present {
+      signal      :  Box::new(self),
+      process_if  : process_if,
+      process_else: process_else
+    }
+  }
 }
 
 
@@ -118,5 +132,103 @@ where
 
     signal_1.runtime().emit(runtime);
     next.call(runtime, (signal_2.emit(), ()));
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// PRESENT
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Clone)]
+pub struct Present<S, P1, P2, V>
+where
+  S: Signal + Sized + Clone,
+  P1: Process<Value = V>,
+  P2: Process<Value = V>,
+  V: 'static
+{
+  signal      : Box<S>,
+  process_if  : P1,
+  process_else: P2
+}
+
+
+impl<S, P1, P2, V> Process for Present<S, P1, P2, V>
+where
+  S: Signal + Sized + 'static,
+  P1: Process<Value = V>,
+  P2: Process<Value = V>,
+  V: 'static
+{
+  type Value = V;
+
+  fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+    println!("Call in Present");
+
+    let signal_1   = self.signal;
+    let signal_2   = signal_1.clone();
+
+    let next_1 = Rc::new(Cell::new(Some(next)));
+    let next_2 = next_1.clone();
+
+    // Case 1: the signal is present during current instant
+    let process_if = self.process_if;
+
+    signal_1.runtime().on_signal(runtime, move |r: &mut Runtime, v: ()| {
+      process_if.call(r, next_1.take().unwrap());
+    });
+
+    // Case 2: the signal is absent during current instant
+    let process_else = self.process_else;
+
+    signal_2.runtime().on_no_signal(runtime, move |r: &mut Runtime, v: ()| {
+      process_else.call(r, next_2.take().unwrap());
+    });
+  }
+}
+
+
+impl<S, P1, P2, V> ProcessMut for Present<S, P1, P2, V>
+where
+  S: Signal + Sized + Clone + 'static,
+  P1: ProcessMut<Value = V>,
+  P2: ProcessMut<Value = V>,
+  V: 'static
+{
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+    println!("Call mut in Present");
+
+    let signal_1 = self.signal;
+    let signal_2 = signal_1.clone();
+    let signal_3 = signal_1.clone();
+
+    let signal_4 = Rc::new(Cell::new(Some(signal_3)));
+    let signal_5 = signal_4.clone();
+
+    let next_1 = Rc::new(Cell::new(Some(next)));
+    let next_2 = next_1.clone();
+
+    let process_if_1 = Rc::new(Cell::new(Some(self.process_if)));
+    let process_if_2 = process_if_1.clone();
+
+    let process_else_1 = Rc::new(Cell::new(Some(self.process_else)));
+    let process_else_2 = process_else_1.clone();
+
+    // Case 1: the signal is present during current instant
+    signal_1.runtime().on_signal(runtime, move |r: &mut Runtime, v: ()| {
+      process_if_1.take().unwrap().call_mut(r, move |r: &mut Runtime, (p, v): (P1, V)| {
+        let present = signal_4.take().unwrap().present(p, process_else_1.take().unwrap());
+        next_1.take().unwrap().call(r, (present, v));
+      });
+    });
+
+    // Case 2: the signal is absent during current instant
+    signal_2.runtime().on_no_signal(runtime, move |r: &mut Runtime, v: ()| {
+      process_else_2.take().unwrap().call_mut(r, move |r: &mut Runtime, (p, v): (P2, V)| {
+        let present = signal_5.take().unwrap().present(process_if_2.take().unwrap(), p);
+        next_2.take().unwrap().call(r, (present, v));
+      });
+    });
   }
 }

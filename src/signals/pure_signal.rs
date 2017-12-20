@@ -43,7 +43,6 @@ mod tests {
   // This allows tests to try both orders without duplicating most of the code.
   fn general_emit_and_await_immediate(await_first: bool) {
     let runtime = Rc::new(RefCell::new(Runtime::new()));
-    let runtime_2 = runtime.clone();
 
     let pure_signal_1 = PureSignal::new();
     let pure_signal_2 = pure_signal_1.clone();
@@ -95,5 +94,49 @@ mod tests {
   #[test]
   fn await_immediate_and_emit () {
     general_emit_and_await_immediate(true);
+  }
+
+
+  fn general_present_or_absent_signal (emit_signal: bool) {
+    let runtime = Rc::new(RefCell::new(Runtime::new()));
+
+    let pure_signal_1 = PureSignal::new();
+    let pure_signal_2 = pure_signal_1.clone();
+
+    let present_signal_1  = Rc::new(Cell::new(false));
+    let present_signal_2  = present_signal_1.clone();
+    let present_signal_3  = present_signal_1.clone();
+
+    // First process: ran if the signal is present (during current instant)
+    let process_if = value(()).map(move |v| {
+      println!("Signal is present");
+      assert_eq!(present_signal_1.get(), true);
+    });
+
+    // Second process: ran if the signal was absent (during previous instant)
+    let process_else = value(()).map(move |v| {
+      println!("Signal is absent");
+      assert_eq!(present_signal_2.get(), false);
+    });
+
+    // Run a present process, and possibly emit the signal during the same instant (using join construct)
+    // Whether the signal shall be emitted or not is decided at this point, according to the given parameter
+    if emit_signal {
+      let emit_process = pure_signal_1.emit().map(move |v| { present_signal_3.set(true); });
+      execute_process(pure_signal_2.present(process_if, process_else).join(emit_process));
+    }
+    else {
+      execute_process(pure_signal_1.present(process_if, process_else));
+    }
+  }
+
+  #[test]
+  fn signal_is_present () {
+    general_present_or_absent_signal(true);
+  }
+
+  #[test]
+  fn signal_is_absent () {
+    general_present_or_absent_signal(false);
   }
 }

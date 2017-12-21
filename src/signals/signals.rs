@@ -113,7 +113,8 @@ where
   type Value = ();
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-    println!("Call in Emit");
+    //println!("Call in Emit");
+    //
     self.signal.runtime().emit(runtime);
     next.call(runtime, ());
   }
@@ -125,7 +126,7 @@ where
   S: Signal + Sized + Clone + 'static
 {
   fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    println!("Call mut in Emit");
+    //println!("Call mut in Emit");
 
     let signal_1 = self.signal;
     let signal_2 = signal_1.clone();
@@ -164,7 +165,7 @@ where
   type Value = V;
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-    println!("Call in Present");
+    //println!("Call in Present");
 
     let signal_1   = self.signal;
     let signal_2   = signal_1.clone();
@@ -197,7 +198,7 @@ where
   V: 'static
 {
   fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    println!("Call mut in Present");
+    //println!("Call mut in Present");
 
     let signal_1 = self.signal;
     let signal_2 = signal_1.clone();

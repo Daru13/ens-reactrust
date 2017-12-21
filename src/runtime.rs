@@ -35,13 +35,14 @@ impl Runtime {
   }
 
   /// Executes a single instant to completion. Indicates if more work remains to be done.
-  pub fn instant(&mut self) -> bool {
+pub fn instant(&mut self) -> bool {
+/*
     println!("Running instant (cur: {}, endof: {}, next: {})",
       self.current_instant_tasks.len(),
       self.end_of_instant_tasks.len(),
       self.next_instant_tasks.len()
     );
-
+*/
     // Run tasks belonging to the current instant, then tasks belonging to the end of current instant
     while self.current_instant() {}
     while self.end_of_instant() {}
@@ -53,7 +54,7 @@ impl Runtime {
   /// Prepare the runtime for moving to the next instant, and update its state accordingly
   /// Returns whether there are next ionstant tasks to run or not
   fn move_to_next_instant(&mut self) -> bool {
-    println!("Moving to next instant...");
+    //println!("Moving to next instant...");
 
     // Clear current instant tasks
     self.current_instant_tasks.clear();
@@ -71,12 +72,6 @@ impl Runtime {
       return false;
     }
 
-    println!("Current instant (cur: {}, endof: {}, next: {})",
-      self.current_instant_tasks.len(),
-      self.end_of_instant_tasks.len(),
-      self.next_instant_tasks.len()
-    );
-
     let task = self.current_instant_tasks.pop();
     match task {
       Some(continuation) => continuation.call_box(self, ()),
@@ -92,12 +87,6 @@ impl Runtime {
       return false;
     }
 
-    println!("End of instant (cur: {}, endof: {}, next: {})",
-      self.current_instant_tasks.len(),
-      self.end_of_instant_tasks.len(),
-      self.next_instant_tasks.len()
-    );
-
     let task = self.end_of_instant_tasks.pop();
     match task {
       Some(continuation) => continuation.call_box(self, ()),
@@ -109,12 +98,6 @@ impl Runtime {
 
   /// Registers a continuation to execute on the current instant.
   pub fn on_current_instant(&mut self, c: Box<Continuation<()>>) {
-    println!("On current instant (cur: {}, endof: {}, next: {})",
-      self.current_instant_tasks.len(),
-      self.end_of_instant_tasks.len(),
-      self.next_instant_tasks.len()
-    );
-
     self.current_instant_tasks.push(c);
   }
 
@@ -126,12 +109,6 @@ impl Runtime {
   /// Registers a continuation to execute at the end of the instant. Runtime calls for `c`
   /// behave as if they where executed during the next instant.
   pub fn on_end_of_instant(&mut self, c: Box<Continuation<()>>) {
-    println!("On end of instant (cur: {}, endof: {}, next: {})",
-      self.current_instant_tasks.len(),
-      self.end_of_instant_tasks.len(),
-      self.next_instant_tasks.len()
-    );
-
     self.end_of_instant_tasks.push(c);
   }
 }

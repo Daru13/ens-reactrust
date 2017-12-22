@@ -10,25 +10,40 @@ use continuations::Continuation;
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Runtime for pure signals.
-struct SignalRuntime {
+struct SignalRuntime<V, E> {
   is_currently_emitted  : Cell<bool>,
+
   call_on_present: RefCell<Vec<Box<Continuation<()>>>>,
   call_later_on_present: RefCell<Vec<Box<Continuation<()>>>>,
-  call_later_on_absent: RefCell<Vec<Box<Continuation<()>>>>
+  call_later_on_absent: RefCell<Vec<Box<Continuation<()>>>>,
+
+  default_value: V,
+  current_value: RefCell<V>,
+  precedent_value: RefCell<V>,
+  gather_value_function: Box<FnMut(E, &mut V)>
 }
 
 
-impl SignalRuntime {
-  pub fn new() -> Self {
+impl<V, E> SignalRuntime<V, E>
+where
+  E: Clone,
+  V: Clone
+{
+  pub fn new(default_value: V, gather_value_function: Box<FnMut(E, &mut V)>) -> Self {
     SignalRuntime {
       is_currently_emitted  : Cell::new(false),
+
       call_on_present: RefCell::new(Vec::new()),
       call_later_on_present: RefCell::new(Vec::new()),
-      call_later_on_absent: RefCell::new(Vec::new())
+      call_later_on_absent: RefCell::new(Vec::new()),
+
+      default_value: default_value.clone(),
+      current_value: RefCell::new(default_value.clone()),
+      precedent_value: RefCell::new(default_value.clone()),
+      gather_value_function: gather_value_function
     }
   }
 }
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // SIGNAL RUNTIME REFERENCE
@@ -36,15 +51,19 @@ impl SignalRuntime {
 
 /// A shared pointer to a signal runtime.
 #[derive(Clone)]
-pub struct SignalRuntimeRef {
-  runtime: Rc<SignalRuntime>,
+pub struct SignalRuntimeRef<V, E> {
+  runtime: Rc<SignalRuntime<V, E>>,
 }
 
 
-impl SignalRuntimeRef {
+impl<V, E> SignalRuntimeRef<V, E>
+where
+  V: Clone + 'static,
+  E: Clone + 'static
+{
 
-  pub fn new() -> Self {
-    SignalRuntimeRef { runtime: Rc::new(SignalRuntime::new()) }
+  pub fn new(default_value: V, gather_value_function: Box<FnMut(E, &mut V)>) -> Self {
+    SignalRuntimeRef { runtime: Rc::new(SignalRuntime::new(default_value, gather_value_function)) }
   }
 
 

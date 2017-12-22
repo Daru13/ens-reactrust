@@ -1,4 +1,6 @@
-use signals::signals::Signal;
+use std::marker::PhantomData;
+
+use signals::signals::*;
 use signals::runtime::SignalRuntimeRef;
 
 
@@ -8,19 +10,19 @@ use signals::runtime::SignalRuntimeRef;
 
 #[derive(Clone)]
 pub struct PureSignal {
-  runtime_ref: SignalRuntimeRef
+  runtime_ref: SignalRuntimeRef<(), ()>
 }
 
 
 impl PureSignal {
   pub fn new() -> Self {
-    PureSignal { runtime_ref: SignalRuntimeRef::new() }
+    PureSignal { runtime_ref: SignalRuntimeRef::new((), Box::new(|e, v| { })) }
   }
 }
 
 
-impl Signal for PureSignal {
-  fn runtime(self) -> SignalRuntimeRef {
+impl Signal<(), ()> for PureSignal {
+  fn runtime(self) -> SignalRuntimeRef<(), ()> {
     self.runtime_ref.clone()
   }
 }

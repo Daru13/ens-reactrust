@@ -12,9 +12,9 @@ use continuations::Continuation;
 /// Runtime for pure signals.
 struct SignalRuntime {
   is_currently_emitted  : Cell<bool>,
-  awaiting_continuations: RefCell<Vec<Box<Continuation<()>>>>,
-  on_present_continuations: RefCell<Vec<Box<Continuation<()>>>>,
-  on_absent_continuations: RefCell<Vec<Box<Continuation<()>>>>,
+  call_on_present: RefCell<Vec<Box<Continuation<()>>>>,
+  call_later_on_present: RefCell<Vec<Box<Continuation<()>>>>,
+  call_later_on_absent: RefCell<Vec<Box<Continuation<()>>>>
 }
 
 
@@ -22,9 +22,9 @@ impl SignalRuntime {
   pub fn new() -> Self {
     SignalRuntime {
       is_currently_emitted  : Cell::new(false),
-      awaiting_continuations: RefCell::new(Vec::new()),
-      on_present_continuations: RefCell::new(Vec::new()),
-      on_absent_continuations: RefCell::new(Vec::new())
+      call_on_present: RefCell::new(Vec::new()),
+      call_later_on_present: RefCell::new(Vec::new()),
+      call_later_on_absent: RefCell::new(Vec::new())
     }
   }
 }
@@ -48,95 +48,85 @@ impl SignalRuntimeRef {
   }
 
 
-  /// Register signal runtime for a reset at the end of current instant.
-  /// The signal runtime fields are reset to their initial state (the same as the one produced by `new`);
-  fn reset_at_end_of_instant(&self, runtime: &mut Runtime) {
+  fn reset_on_end_of_instant(&self, runtime: &mut Runtime) {
     let signal_runtime = self.runtime.clone();
-    let reset_continuation = move |r: &mut Runtime, v: ()| {
-      signal_runtime.is_currently_emitted.set(false);
-      signal_runtime.awaiting_continuations.borrow_mut().clear();
-      signal_runtime.on_absent_continuations.borrow_mut().clear();
-    };
 
-    runtime.on_end_of_instant(Box::new(reset_continuation));
+    runtime.on_end_of_instant(Box::new(move |r: &mut Runtime, v: ()| {
+      signal_runtime.is_currently_emitted.set(false);
+      signal_runtime.call_on_present.borrow_mut().clear();
+      signal_runtime.call_later_on_present.borrow_mut().clear();
+      signal_runtime.call_later_on_absent.borrow_mut().clear();
+    }));
+  }
+
+
+  fn run_continuations_on_next_instant(&self, runtime: &mut Runtime) {
+    let signal_runtime = self.runtime.clone();
+
+    runtime.on_next_instant(Box::new(move |r: &mut Runtime, v: ()| {
+      let mut later_on_present_continuations = signal_runtime.call_later_on_present.borrow_mut();
+      for boxed_continuation in later_on_present_continuations.drain(..) {
+        r.on_current_instant(boxed_continuation);
+      }
+
+      let mut later_on_absent_continuations  = signal_runtime.call_later_on_absent.borrow_mut();
+      for boxed_continuation in later_on_absent_continuations.drain(..) {
+        r.on_current_instant(boxed_continuation);
+      }
+    }));
   }
 
 
   /// Sets the signal as emitted for the current instant.
   pub fn emit(self, mut runtime: &mut Runtime) {
-    //println!("Emit signal");
-
     if self.runtime.is_currently_emitted.get() {
-      // println!("Signal has already been emitted, nothing to do");
       return;
     }
 
     self.runtime.is_currently_emitted.set(true);
-    self.reset_at_end_of_instant(runtime);
+    self.reset_on_end_of_instant(runtime);
 
     // Empty the list of continuations to execute during next instant if there is *no* signal
-    self.runtime.on_absent_continuations.borrow_mut().clear();
+    self.runtime.call_later_on_absent.borrow_mut().clear();
 
-    // Add awaiting continuations to ĉurrent instant
-    let mut awaiting_continuations  = self.runtime.awaiting_continuations.borrow_mut();
-    let registered_continuations_iter = awaiting_continuations.drain(..);
-
-    for boxed_continuation in registered_continuations_iter {
+    // Add awaiting continuations to current instant
+    let mut on_present_continuations = self.runtime.call_on_present.borrow_mut();
+    for boxed_continuation in on_present_continuations.drain(..) {
       runtime.on_current_instant(boxed_continuation);
     }
   }
 
 
-  /// Calls `c` at the first cycle where the signal is present.
-  pub fn on_signal<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
-    //println!("On signal");
-
+  pub fn on_present<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
     if self.runtime.is_currently_emitted.get() {
       runtime.on_current_instant(Box::new(c));
     }
     else {
-      self.runtime.awaiting_continuations.borrow_mut().push(Box::new(c));
+      self.runtime.call_on_present.borrow_mut().push(Box::new(c));
     }
   }
 
-  // TODO: check if this version is actually needed or not...
-  pub fn on_signal_mut<C>(&mut self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
-    //println!("On signal mut");
 
+  pub fn later_on_present<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
     if self.runtime.is_currently_emitted.get() {
-      runtime.on_current_instant(Box::new(c));
+      runtime.on_next_instant(Box::new(c));
     }
     else {
-      self.runtime.awaiting_continuations.borrow_mut().push(Box::new(c));
+      self.runtime.call_later_on_present.borrow_mut().push(Box::new(c));
     }
   }
 
 
-  /// Calls `c` during the next cycle if the signal is not present during current cycle.
-  pub fn on_no_signal<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
-    //println!("On no signal");
-
+  pub fn later_on_absent<C>(self, runtime: &mut Runtime, c: C) where C: Continuation<()> {
     if self.runtime.is_currently_emitted.get() {
       return;
     }
     else {
-      let signal_runtime = Rc::new(Cell::new(Some(self.runtime.clone())));
-
-      if self.runtime.on_absent_continuations.borrow_mut().is_empty() {
-        let run_next_instant_continuations = move |r: &mut Runtime, v: ()| {
-          let     signal_runtime               = signal_runtime.take().unwrap();
-          let mut on_absent_continuations      = signal_runtime.on_absent_continuations.borrow_mut();
-          let     on_absent_continuations_iter = on_absent_continuations.drain(..);
-
-          for boxed_continuation in on_absent_continuations_iter {
-            r.on_current_instant(boxed_continuation);
-          }
-        };
-
-        runtime.on_next_instant(Box::new(run_next_instant_continuations));
+      if self.runtime.call_later_on_absent.borrow_mut().is_empty() {
+        self.run_continuations_on_next_instant(runtime);
       }
 
-      self.runtime.on_absent_continuations.borrow_mut().push(Box::new(c));
+      self.runtime.call_later_on_absent.borrow_mut().push(Box::new(c));
     }
   }
 }

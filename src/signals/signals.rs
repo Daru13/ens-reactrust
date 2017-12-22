@@ -19,6 +19,13 @@ where
   /// Returns a reference to the signal's runtime.
   fn runtime(self) -> SignalRuntimeRef;
 
+  fn await(self) -> Await<Self>
+  where
+    Self: Sized + 'static
+  {
+    Await { signal: Box::new(self) }
+  }
+
   /// Returns a process that waits for the next emission of the signal, current instant
   /// included.
   fn await_immediate(self) -> AwaitImmediate<Self>
@@ -43,10 +50,50 @@ where
     V: 'static
   {
     Present {
-      signal      :  Box::new(self),
+      signal      : Box::new(self),
       process_if  : process_if,
       process_else: process_else
     }
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// AWAIT
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+#[derive(Clone)]
+pub struct Await<S>
+where
+  S: Signal + Sized + Clone
+{
+  signal: Box<S>
+}
+
+
+impl<S> Process for Await<S>
+where
+  S: Signal + Sized + 'static
+{
+  type Value = ();
+
+  fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
+    self.signal.runtime().later_on_present(runtime, next);
+  }
+}
+
+
+impl<S> ProcessMut for Await<S>
+where
+  S: Signal + Sized + Clone + 'static
+{
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+    let s1 = *self.signal;
+    let s2 = s1.clone();
+
+    s1.runtime().later_on_present(runtime, move |r: &mut Runtime, v: ()| {
+      next.call(r, (s2.await(), ()));
+    });
   }
 }
 
@@ -72,7 +119,7 @@ where
   type Value = ();
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-    self.signal.runtime().on_signal(runtime, next);
+    self.signal.runtime().on_present(runtime, next);
   }
 }
 
@@ -85,7 +132,7 @@ where
     let s1 = *self.signal;
     let s2 = s1.clone();
 
-    s1.runtime().on_signal_mut(runtime, move |r: &mut Runtime, v: ()| {
+    s1.runtime().on_present(runtime, move |r: &mut Runtime, v: ()| {
       next.call(r, (s2.await_immediate(), ()));
     });
   }
@@ -114,7 +161,7 @@ where
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
     //println!("Call in Emit");
-    //
+
     self.signal.runtime().emit(runtime);
     next.call(runtime, ());
   }
@@ -176,14 +223,14 @@ where
     // Case 1: the signal is present during current instant
     let process_if = self.process_if;
 
-    signal_1.runtime().on_signal(runtime, move |r: &mut Runtime, v: ()| {
+    signal_1.runtime().on_present(runtime, move |r: &mut Runtime, v: ()| {
       process_if.call(r, next_1.take().unwrap());
     });
 
     // Case 2: the signal is absent during current instant
     let process_else = self.process_else;
 
-    signal_2.runtime().on_no_signal(runtime, move |r: &mut Runtime, v: ()| {
+    signal_2.runtime().later_on_absent(runtime, move |r: &mut Runtime, v: ()| {
       process_else.call(r, next_2.take().unwrap());
     });
   }
@@ -217,7 +264,7 @@ where
     let process_else_2 = process_else_1.clone();
 
     // Case 1: the signal is present during current instant
-    signal_1.runtime().on_signal(runtime, move |r: &mut Runtime, v: ()| {
+    signal_1.runtime().on_present(runtime, move |r: &mut Runtime, v: ()| {
       process_if_1.take().unwrap().call_mut(r, move |r: &mut Runtime, (p, v): (P1, V)| {
         let present = signal_4.take().unwrap().present(p, process_else_1.take().unwrap());
         next_1.take().unwrap().call(r, (present, v));
@@ -225,7 +272,7 @@ where
     });
 
     // Case 2: the signal is absent during current instant
-    signal_2.runtime().on_no_signal(runtime, move |r: &mut Runtime, v: ()| {
+    signal_2.runtime().later_on_absent(runtime, move |r: &mut Runtime, v: ()| {
       process_else_2.take().unwrap().call_mut(r, move |r: &mut Runtime, (p, v): (P2, V)| {
         let present = signal_5.take().unwrap().present(process_if_2.take().unwrap(), p);
         next_2.take().unwrap().call(r, (present, v));

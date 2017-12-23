@@ -12,7 +12,10 @@ use signals::runtime::SignalRuntimeRef;
 // SIGNAL
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// A reactive signal.
+/// Reactive signal.
+///
+/// It provides various methods for creating processes related to the signal.
+/// It only requires to implement the `runtime` method, in order to access the related `SignalRuntimeRef`.
 pub trait Signal<V, E>
 where
   Self: Clone,
@@ -22,13 +25,13 @@ where
   /// Returns a reference to the signal's runtime.
   fn runtime(self) -> SignalRuntimeRef<V, E>;
 
-  fn emit(self) -> Emit<Self, V, E>
-  where
-    Self: Sized + 'static
-  {
-    Emit { signal: Box::new(self), phantom: PhantomData }
+  /// Emit the signal with the given value.
+  fn emit_value(self, value: E) -> Emit<Self, V, E> {
+    Emit { signal: Box::new(self), value: value, phantom: PhantomData }
   }
 
+  /// Return a process which waits for the signal to be emitted,
+  /// and run on next instant if it does.
   fn await(self) -> Await<Self, V, E>
   where
     Self: Sized + 'static
@@ -36,8 +39,8 @@ where
     Await { signal: Box::new(self), phantom: PhantomData }
   }
 
-  /// Returns a process that waits for the next emission of the signal, current instant
-  /// included.
+  /// Return a process which waits for the signal to be emitted,
+  /// and run on current instant if it does.
   fn await_immediate(self) -> AwaitImmediate<Self, V, E>
   where
     Self: Sized + 'static
@@ -45,6 +48,10 @@ where
     AwaitImmediate { signal: Box::new(self), phantom: PhantomData }
   }
 
+  /// Return a process which waits for the signal to be emitted, and either:
+  ///
+  /// * run `process_if` on current instant if the signal is emitted;
+  /// * run `process_else` on next instant if the signal is **not** emitted.
   fn present<P1, P2, PV>(self, process_if: P1, process_else: P2) -> Present<Self, P1, P2, PV, V, E>
   where
     Self: Sized + 'static,
@@ -66,6 +73,7 @@ where
 // AWAIT
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// Process awaiting for a signal to be emitted, and running during next instant if it does.
 #[derive(Clone)]
 pub struct Await<S, V, E>
 where
@@ -84,7 +92,7 @@ where
   V: Clone + 'static,
   E: Clone + 'static
 {
-  type Value = ();
+  type Value = V;
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
     self.signal.runtime().later_on_present(runtime, next);
@@ -99,11 +107,11 @@ where
   E: Clone + 'static
 {
   fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    let s1 = *self.signal;
+    let s1 = self.signal;
     let s2 = s1.clone();
 
-    s1.runtime().later_on_present(runtime, move |r: &mut Runtime, v: ()| {
-      next.call(r, (s2.await(), ()));
+    s1.runtime().later_on_present(runtime, move |r: &mut Runtime, v: Self::Value| {
+      next.call(r, (s2.await(), v));
     });
   }
 }
@@ -113,7 +121,7 @@ where
 // AWAIT IMMEDIATE
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-
+/// Process awaiting for a signal to be emitted, and running during current instant if it does.
 #[derive(Clone)]
 pub struct AwaitImmediate<S, V, E>
 where
@@ -161,7 +169,7 @@ where
 // EMIT
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-
+/// Process emitting a signal with the given value.
 #[derive(Clone)]
 pub struct Emit<S, V, E>
 where
@@ -170,6 +178,7 @@ where
   E: Clone + 'static
 {
   signal: Box<S>,
+  value: E,
   phantom: PhantomData<(V, E)>
 }
 
@@ -185,7 +194,7 @@ where
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
     //println!("Call in Emit");
 
-    self.signal.runtime().emit(runtime);
+    self.signal.runtime().emit(runtime, self.value);
     next.call(runtime, ());
   }
 }
@@ -203,8 +212,8 @@ where
     let signal_1 = self.signal;
     let signal_2 = signal_1.clone();
 
-    signal_1.runtime().emit(runtime);
-    next.call(runtime, (signal_2.emit(), ()));
+    signal_1.runtime().emit(runtime, self.value.clone());
+    next.call(runtime, (signal_2.emit_value(self.value), ()));
   }
 }
 
@@ -213,6 +222,11 @@ where
 // PRESENT
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+
+/// Process awaiting for a signal to be emitted, and either:
+///
+/// * run `process_if` during current instant, if the signal is emitted;
+/// * run `process_else` during next instant, if the signal is **not** emitted.
 #[derive(Clone)]
 pub struct Present<S, P1, P2, PV, SV, E>
 where

@@ -1,3 +1,5 @@
+(* Example given in the project instructions (part 3, question 2) *)
+
 signal s in
 loop
   emit s;

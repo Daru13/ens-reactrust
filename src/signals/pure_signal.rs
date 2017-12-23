@@ -8,6 +8,7 @@ use signals::runtime::SignalRuntimeRef;
 // PURE SIGNAL
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+/// Pure signal, with no value.
 #[derive(Clone)]
 pub struct PureSignal {
   runtime_ref: SignalRuntimeRef<(), ()>
@@ -15,8 +16,15 @@ pub struct PureSignal {
 
 
 impl PureSignal {
+  /// Create a new `PureSignal`.
   pub fn new() -> Self {
-    PureSignal { runtime_ref: SignalRuntimeRef::new((), Box::new(|e, v| { })) }
+    PureSignal { runtime_ref: SignalRuntimeRef::new((), Box::new(|_, _| { })) }
+  }
+
+  /// Emit the signal during current instant.
+  /// This function is equivalent to calling `emit_value` with value `()`.
+  pub fn emit(self) -> Emit<Self, (), ()> {
+    self.emit_value(())
   }
 }
 

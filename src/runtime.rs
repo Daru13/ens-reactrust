@@ -35,14 +35,15 @@ impl Runtime {
   }
 
   /// Executes a single instant to completion. Indicates if more work remains to be done.
-pub fn instant(&mut self) -> bool {
-/*
+  pub fn instant(&mut self) -> bool {
+    /*
     println!("Running instant (cur: {}, endof: {}, next: {})",
       self.current_instant_tasks.len(),
       self.end_of_instant_tasks.len(),
       self.next_instant_tasks.len()
     );
-*/
+    */
+
     // Run tasks belonging to the current instant, then tasks belonging to the end of current instant
     while self.current_instant() {}
     while self.end_of_instant() {}
@@ -51,8 +52,8 @@ pub fn instant(&mut self) -> bool {
     return self.move_to_next_instant();
   }
 
-  /// Prepare the runtime for moving to the next instant, and update its state accordingly
-  /// Returns whether there are next ionstant tasks to run or not
+  /// Prepare the runtime for moving to the next instant, and update its state accordingly.
+  /// Returns whether there are more tasks to run during current instant.
   fn move_to_next_instant(&mut self) -> bool {
     //println!("Moving to next instant...");
 
@@ -67,31 +68,29 @@ pub fn instant(&mut self) -> bool {
   }
 
   /// Execute a single task registered as a current instant task
+  /// Returns whether there are more tasks to run during current instant.
   fn current_instant(&mut self) -> bool {
     if self.current_instant_tasks.is_empty() {
       return false;
     }
 
-    let task = self.current_instant_tasks.pop();
-    match task {
-      Some(continuation) => continuation.call_box(self, ()),
-      None               => () // Should not happen
-    };
+    if let Some(continuation) = self.current_instant_tasks.pop() {
+      continuation.call_box(self, ());
+    }
 
     return !self.current_instant_tasks.is_empty();
   }
 
-  /// Execute a single task registered as an end-of-instant task
+  /// Execute a single task registered as an end-of-instant task.
+  /// Returns whether there are more tasks to run during end of instant instant.
   fn end_of_instant(&mut self) -> bool {
     if self.end_of_instant_tasks.is_empty() {
       return false;
     }
 
-    let task = self.end_of_instant_tasks.pop();
-    match task {
-      Some(continuation) => continuation.call_box(self, ()),
-      None               => () // Should not happen
-    };
+    if let Some(continuation) = self.end_of_instant_tasks.pop() {
+      continuation.call_box(self, ())
+    }
 
     return !self.end_of_instant_tasks.is_empty();
   }
@@ -101,13 +100,13 @@ pub fn instant(&mut self) -> bool {
     self.current_instant_tasks.push(c);
   }
 
-  /// Registers a continuation to execute at the next instant.
+  /// Registers a continuation to execute on the next instant.
   pub fn on_next_instant(&mut self, c: Box<Continuation<()>>) {
     self.next_instant_tasks.push(c);
   }
 
-  /// Registers a continuation to execute at the end of the instant. Runtime calls for `c`
-  /// behave as if they where executed during the next instant.
+  /// Registers a continuation to execute at the end of current instant.
+  /// Runtime calls for `c` behave as if they where executed during the next instant.
   pub fn on_end_of_instant(&mut self, c: Box<Continuation<()>>) {
     self.end_of_instant_tasks.push(c);
   }

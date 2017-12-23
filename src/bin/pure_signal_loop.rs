@@ -4,6 +4,14 @@ use reactrust::processes::*;
 use reactrust::signals::signals::Signal;
 use reactrust::signals::pure_signal::PureSignal;
 
+
+/// Example program, which has the same behaviour of the the ReactiveML code snippet
+/// given in question 2, part 3 of the project instructions.
+///
+/// It infinitely loops over three joined processes, which respectively:
+/// * emit a signal S, and pause;
+/// * test whether the signal S is present or absent, and pause;
+/// * await (immediately) for the signal S, and pause.
 fn main () {
   let pure_signal_1 = PureSignal::new();
   let pure_signal_2 = pure_signal_1.clone();

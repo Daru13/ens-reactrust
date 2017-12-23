@@ -1,11 +1,12 @@
 use runtime::Runtime;
 
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // CONTINUATION
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// A reactive continuation awaiting a value of type `V`. For the sake of simplicity,
-/// continuation must be valid on the static lifetime.
+/// A reactive continuation awaiting a value of type `V`.
+/// For the sake of simplicity, continuations must be valid on the `static` lifetime.
 pub trait Continuation<V>: 'static {
   /// Calls the continuation.
   fn call(self, runtime: &mut Runtime, value: V);
@@ -17,20 +18,37 @@ pub trait Continuation<V>: 'static {
   /// underlying type of the `Continuation`.
   fn call_box(self: Box<Self>, runtime: &mut Runtime, value: V);
 
-  /// Creates a new continuation that applies a function to the input value before
-  /// calling `Self`.
-  fn map<F, V2>(self, map: F) -> Map<Self, F> where Self: Sized, F: FnOnce(V2) -> V + 'static {
-    Map { continuation: self, map }
+  /// Creates a new continuation that applies a function to the input value before calling `Self`.
+  fn map<F, V2>(self, map: F) -> Map<Self, F>
+  where
+    Self: Sized,
+    F: FnOnce(V2) -> V + 'static
+  {
+    Map {
+      continuation: self,
+      map: map
+    }
   }
 
   /// Creates a new continuation that waits for the next instant before running a continuation
-  fn pause(self) -> Pause<Self> where Self: Sized {
-    Pause { continuation: self }
+  fn pause(self) -> Pause<Self>
+  where
+    Self: Sized
+  {
+    Pause {
+      continuation: self
+    }
   }
-
 }
 
-impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + 'static {
+
+/// Functions of type `FnOnce` are considered to be continuations.
+///
+/// This is used in order to make continuations out of Rust closures.
+impl<V, F> Continuation<V> for F
+where
+  F: FnOnce(&mut Runtime, V) + 'static
+{
   fn call(self, runtime: &mut Runtime, value: V) {
     self(runtime, value);
   }
@@ -45,10 +63,17 @@ impl<V, F> Continuation<V> for F where F: FnOnce(&mut Runtime, V) + 'static {
 // MAP
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// A continuation that applies a function before calling another continuation.
-pub struct Map<C, F> { continuation: C, map: F }
+/// A continuation that applies a function to the value it receives,
+/// before calling another continuation.
+pub struct Map<C, F> {
+  continuation: C,
+  map: F
+}
 
-impl<C, F, V1, V2> Continuation<V1> for Map<C, F> where C: Continuation<V2>, F: FnOnce(V1) -> V2 + 'static
+impl<C, F, V1, V2> Continuation<V1> for Map<C, F>
+where
+  C: Continuation<V2>,
+  F: FnOnce(V1) -> V2 + 'static
 {
   fn call(self, runtime: &mut Runtime, value: V1) {
     let result = (self.map)(value);
@@ -62,13 +87,17 @@ impl<C, F, V1, V2> Continuation<V1> for Map<C, F> where C: Continuation<V2>, F: 
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-// MAP
+// PAUSE
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// A continuation that postpone its execution to the next instant.
-pub struct Pause<C> { continuation: C }
+/// A continuation that postpones its execution to the next instant.
+pub struct Pause<C> {
+  continuation: C
+}
 
-impl<C, V> Continuation<V> for Pause<C> where C: Continuation<V>, V: 'static
+impl<C, V> Continuation<V> for Pause<C>
+where
+  C: Continuation<V>, V: 'static
 {
   fn call(self, runtime: &mut Runtime, value: V) {
     runtime.on_next_instant(Box::new(move |r: &mut Runtime, ()| {

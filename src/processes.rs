@@ -4,8 +4,9 @@ use std::cell::Cell;
 use continuations::Continuation;
 use runtime::Runtime;
 
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-// PROCESSES
+// PROCESS
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A reactive process.
@@ -45,7 +46,7 @@ pub trait Process: 'static {
     FlattenedProcess { process: self }
   }
 
-  /// Successively applies map and flatten.
+  /// Successively applies `map` and `flatten`.
   fn and_then<F, O>(self, function: F) -> FlattenedProcess<MappedProcess<Self, F>>
   where
     Self: Sized,
@@ -55,6 +56,8 @@ pub trait Process: 'static {
     self.map(function).flatten()
   }
 
+  /// Return a process which run two sub-processes and waits for both to terminate,
+  /// so it can give a couple formed by both results to the continuation it is given.
   fn join<P, V>(self, process: P) -> JoinedProcess<Self, P>
   where
     Self: Sized,
@@ -64,20 +67,47 @@ pub trait Process: 'static {
   }
 }
 
-/*
-pub fn execute_process_on_runtime<P, V>(process: P, runtime: &mut Runtime) -> V
-where
-  P: Process<Value = V>,
-  V: ::std::fmt::Debug + 'static
-{
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// MUTABLE PROCESSES
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Hack by Mathieu Fehr, for testing Value field equality on Process
+pub trait Is {
+    type Value;
 }
-*/
 
+impl<T> Is for T {
+    type Value = T;
+}
+
+/// A process that can be executed multiple times, modifying its environement each time.
+pub trait ProcessMut: Process {
+  /// Executes the mutable process in the runtime, then calls `next` with the process and the
+  /// process's return value.
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where
+    Self: Sized,
+    C: Continuation<(Self, Self::Value)>;
+
+  fn while_loop<T>(self) -> WhileProcess<Self> where
+    Self: Sized,
+    Self::Value: Is<Value = LoopStatus<T>>
+  {
+    WhileProcess { process: self }
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// UTILITY FUNCTIONS
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Execute the given process in a freshly created `Runtime`,
+/// and return the result value.
 pub fn execute_process<P, V>(process: P) -> V
 where
   P: Process<Value = V>,
-  V: ::std::fmt::Debug + 'static
+  V: 'static // + ::std::fmt::Debug
 {
   let mut runtime = Runtime::new();
 
@@ -86,7 +116,7 @@ where
 
   let main_continuation = move |r: &mut Runtime, v: ()| {
     process.call(r, move |r: &mut Runtime, v: V| {
-      println!("Return value has been computed: {:?}", v);
+      // println!("Return value has been computed: {:?}", v);
       return_value.set(Some(v));
     });
   };
@@ -98,11 +128,21 @@ where
 }
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// VALUE PROCESS
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// A process returning a single value.
+/// A process returning a single value it holds.
 pub struct ValueProcess<V> {
   value: V
 }
+
+
+/// Returns a new `ValueProcess` containing the given value.
+pub fn value<V> (value: V) -> ValueProcess<V> {
+  ValueProcess { value: value }
+}
+
 
 impl<V> Process for ValueProcess<V>
 where
@@ -115,11 +155,21 @@ where
   }
 }
 
-/// Returns a new value process built from the given value.
-pub fn value<V> (value: V) -> ValueProcess<V> {
-  ValueProcess { value: value }
+
+impl<V> ProcessMut for ValueProcess<V>
+where
+  V: Clone + 'static
+{
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+    let value = self.value.clone();
+    next.call(runtime, (self, value));
+  }
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// PAUSE PROCESS
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A process pausing one instant before calling itself.
 pub struct PausedProcess<P> {
@@ -138,7 +188,24 @@ where
 }
 
 
-/// A process applying a function to its value before calling itself.
+impl<P, V> ProcessMut for PausedProcess<P>
+where
+  P: ProcessMut<Value = V>,
+  V: 'static
+{
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+    self.process.call_mut(runtime, |r: &mut Runtime, (p, v): (P, V)| {
+      next.pause().call(r, (p.pause(), v))
+    });
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// MAP PROCESS
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// A process applying a function to its output value.
 pub struct MappedProcess<P, F> {
   process: P,
   function: F
@@ -157,7 +224,27 @@ where
 }
 
 
-/// A process calling the process returned by its own call.
+impl<P, F, I, O> ProcessMut for MappedProcess<P, F>
+where
+  P: ProcessMut<Value = I>,
+  F: FnMut(I) -> O + 'static,
+{
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+    let mut f = self.function;
+
+    self.process.call_mut(runtime, move |r: &mut Runtime, (p, v): (P, I)| {
+      let value = f(v);
+      next.call(r, (p.map(f), value));
+    });
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// FLATTEN PROCESS
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// A process calling the process it contains, and giving the resulting value to itself.
 pub struct FlattenedProcess<PP> {
   process: PP
 }
@@ -177,9 +264,31 @@ where
 }
 
 
+impl<PP, P, V> ProcessMut for FlattenedProcess<PP>
+where
+  PP: ProcessMut<Value = P>,
+  P:  ProcessMut<Value = V>
+{
+  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
+    self.process.call_mut(runtime, |runtime: &mut Runtime, (pp, p): (PP, P)| {
+      p.call_mut(runtime, |r: &mut Runtime, (p, v): (P, V)| {
+        next.call(r, (pp.flatten(), v));
+      });
+    });
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// JOIN PROCESS
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 /// A process calling two sub-processes before calling the next process with both returned values.
 
-pub struct JoinPoint<V1, V2, C>
+/// A helper structure, used by `JoinedProcess` to synchronize the call of two processes.
+///
+/// This version is specific to the implementaion of `Process`.
+struct JoinPoint<V1, V2, C>
 where
   C: Continuation<(V1, V2)>
 {
@@ -192,6 +301,7 @@ impl<V1, V2, C> JoinPoint<V1, V2, C>
 where
   C: Continuation<(V1, V2)> + 'static
 {
+  /// Create a new `JoinPoint` with the given `next` continuation.
   fn new(next: C) -> JoinPoint<V1, V2, C> {
     JoinPoint {
       P1_result: Rc::new(Cell::new(None)),
@@ -201,6 +311,9 @@ where
   }
 }
 
+
+/// A process calling two sub-processes in a *synchronized* way,
+/// i.e. waiting for both to finnish running before running the given `next` continuation.
 pub struct JoinedProcess<P1, P2>
 where
   P1: Process + 'static,
@@ -209,6 +322,7 @@ where
   process_1: P1,
   process_2: P2
 }
+
 
 impl<P1, P2> Process for JoinedProcess<P1, P2>
 where
@@ -252,114 +366,11 @@ where
 }
 
 
-///////////////////////////////////////////////////////////////////////////////////////////////////
-// MUTABLE PROCESSES
-///////////////////////////////////////////////////////////////////////////////////////////////////
+// Mutable process version below
 
-// Hack by Mathieu Fehr, for testing Value field equality on Process
-pub trait Is {
-    type Value;
-}
-
-impl<T> Is for T {
-    type Value = T;
-}
-
-/// A process that can be executed multiple times, modifying its environement each time.
-pub trait ProcessMut: Process {
-  /// Executes the mutable process in the runtime, then calls `next` with the process and the
-  /// process's return value.
-  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where
-    Self: Sized,
-    C: Continuation<(Self, Self::Value)>;
-
-  fn while_loop<T>(self) -> WhileProcess<Self> where
-    Self: Sized,
-    Self::Value: Is<Value = LoopStatus<T>>
-  {
-    WhileProcess { process: self }
-  }
-}
-
-/// Indicates if a loop is finished.
-#[derive(Debug)]
-pub enum LoopStatus<V> { Continue, Exit(V) }
-
-pub struct WhileProcess<P> {
-  process: P
-}
-
-impl<P, V> Process for WhileProcess<P>
-where
-  P: ProcessMut<Value = LoopStatus<V>>
-{
-  type Value = V;
-
-  fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self::Value)> {
-    self.process.call_mut(runtime, |r: &mut Runtime, (p, v): (P, LoopStatus<V>)| {
-      match v {
-        LoopStatus::Continue     => p.while_loop().call(r, next),
-        LoopStatus::Exit(output) => next.call(r, output)
-      };
-    });
-  }
-}
-
-
-impl<V> ProcessMut for ValueProcess<V>
-where
-  V: Clone + 'static
-{
-  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    let value = self.value.clone();
-    next.call(runtime, (self, value));
-  }
-}
-
-
-impl<P, V> ProcessMut for PausedProcess<P>
-where
-  P: ProcessMut<Value = V>,
-  V: 'static
-{
-  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    self.process.call_mut(runtime, |r: &mut Runtime, (p, v): (P, V)| {
-      next.pause().call(r, (p.pause(), v))
-    });
-  }
-}
-
-
-impl<P, F, I, O> ProcessMut for MappedProcess<P, F>
-where
-  P: ProcessMut<Value = I>,
-  F: FnMut(I) -> O + 'static,
-{
-  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    let mut f = self.function;
-
-    self.process.call_mut(runtime, move |r: &mut Runtime, (p, v): (P, I)| {
-      let value = f(v);
-      next.call(r, (p.map(f), value));
-    });
-  }
-}
-
-
-impl<PP, P, V> ProcessMut for FlattenedProcess<PP>
-where
-  PP: ProcessMut<Value = P>,
-  P:  ProcessMut<Value = V>
-{
-  fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    self.process.call_mut(runtime, |runtime: &mut Runtime, (pp, p): (PP, P)| {
-      p.call_mut(runtime, |r: &mut Runtime, (p, v): (P, V)| {
-        next.call(r, (pp.flatten(), v));
-      });
-    });
-  }
-}
-
+/// A helper structure, used by `JoinedProcess` to synchronize the call of two processes.
+///
+/// This version is specific to the implementaion of `ProcessMut`.
 struct JoinPointMut<C, P1, P2, V1, V2>
 where
   C: Continuation<(JoinedProcess<P1, P2>, (V1, V2))>,
@@ -372,6 +383,7 @@ where
   p1       : Rc<Cell<Option<P1>>>,
   p2       : Rc<Cell<Option<P2>>>
 }
+
 
 impl<C, P1, P2, V1, V2> JoinPointMut<C, P1, P2, V1, V2>
 where
@@ -389,6 +401,7 @@ where
     }
   }
 }
+
 
 impl<P1, P2> ProcessMut for JoinedProcess<P1, P2>
 where
@@ -433,6 +446,41 @@ where
       else {
         join_point_2.P2_result.set(Some(v2));
       }
+    });
+  }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// WHILE PROCESS
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Indicates if a loop is finished.
+#[derive(Debug)]
+pub enum LoopStatus<V> { Continue, Exit(V) }
+
+/// A process calling itself in a *while* loop fashion, until it returns `LoopStatus::Exit<V>`,
+/// which contains the value to give to the `next` continuation.
+pub struct WhileProcess<P>
+where
+  P: Process + 'static
+{
+  process: P
+}
+
+
+impl<P, V> Process for WhileProcess<P>
+where
+  P: ProcessMut<Value = LoopStatus<V>>
+{
+  type Value = V;
+
+  fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self::Value)> {
+    self.process.call_mut(runtime, |r: &mut Runtime, (p, v): (P, LoopStatus<V>)| {
+      match v {
+        LoopStatus::Continue     => p.while_loop().call(r, next),
+        LoopStatus::Exit(output) => next.call(r, output)
+      };
     });
   }
 }

@@ -20,34 +20,34 @@ pub trait Process: 'static {
     C: Continuation<Self::Value>;
 
   /// Returns a process which waits an instant before running.
-  fn pause(self) -> PausedProcess<Self>
+  fn pause(self) -> PauseProcess<Self>
   where
     Self: Sized
   {
-    PausedProcess { process: self }
+    PauseProcess { process: self }
   }
 
   /// Returns a process which applies the given function to its value
   /// before passing the result to the continuation.
-  fn map<F, O>(self, function: F) -> MappedProcess<Self, F>
+  fn map<F, O>(self, function: F) -> MapProcess<Self, F>
   where
     Self: Sized,
     F: FnOnce(Self::Value) -> O + 'static
   {
-    MappedProcess { process: self, function: function }
+    MapProcess { process: self, function: function }
   }
 
   /// Returns a process which run the process returned by itself.
-  fn flatten(self) -> FlattenedProcess<Self>
+  fn flatten(self) -> FlattenProcess<Self>
   where
     Self: Sized,
     Self::Value: Process
   {
-    FlattenedProcess { process: self }
+    FlattenProcess { process: self }
   }
 
   /// Successively applies `map` and `flatten`.
-  fn and_then<F, O>(self, function: F) -> FlattenedProcess<MappedProcess<Self, F>>
+  fn and_then<F, O>(self, function: F) -> FlattenProcess<MapProcess<Self, F>>
   where
     Self: Sized,
     F: FnOnce(Self::Value) -> O + 'static,
@@ -58,12 +58,12 @@ pub trait Process: 'static {
 
   /// Return a process which run two sub-processes and waits for both to terminate,
   /// so it can give a couple formed by both results to the continuation it is given.
-  fn join<P, V>(self, process: P) -> JoinedProcess<Self, P>
+  fn join<P, V>(self, process: P) -> JoinProcess<Self, P>
   where
     Self: Sized,
     P: Process<Value = V>
   {
-    JoinedProcess { process_1: self, process_2: process }
+    JoinProcess { process_1: self, process_2: process }
   }
 }
 
@@ -172,11 +172,11 @@ where
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A process pausing one instant before calling itself.
-pub struct PausedProcess<P> {
+pub struct PauseProcess<P> {
   process: P
 }
 
-impl<P> Process for PausedProcess<P>
+impl<P> Process for PauseProcess<P>
 where
   P: Process + 'static
 {
@@ -188,7 +188,7 @@ where
 }
 
 
-impl<P, V> ProcessMut for PausedProcess<P>
+impl<P, V> ProcessMut for PauseProcess<P>
 where
   P: ProcessMut<Value = V>,
   V: 'static
@@ -206,12 +206,12 @@ where
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A process applying a function to its output value.
-pub struct MappedProcess<P, F> {
+pub struct MapProcess<P, F> {
   process: P,
   function: F
 }
 
-impl<P, F, I, O> Process for MappedProcess<P, F>
+impl<P, F, I, O> Process for MapProcess<P, F>
 where
   P: Process<Value = I>,
   F: FnOnce(I) -> O + 'static
@@ -224,7 +224,7 @@ where
 }
 
 
-impl<P, F, I, O> ProcessMut for MappedProcess<P, F>
+impl<P, F, I, O> ProcessMut for MapProcess<P, F>
 where
   P: ProcessMut<Value = I>,
   F: FnMut(I) -> O + 'static,
@@ -245,11 +245,11 @@ where
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// A process calling the process it contains, and giving the resulting value to itself.
-pub struct FlattenedProcess<PP> {
+pub struct FlattenProcess<PP> {
   process: PP
 }
 
-impl<PP, P> Process for FlattenedProcess<PP>
+impl<PP, P> Process for FlattenProcess<PP>
 where
   PP: Process<Value = P>,
   P: Process
@@ -264,7 +264,7 @@ where
 }
 
 
-impl<PP, P, V> ProcessMut for FlattenedProcess<PP>
+impl<PP, P, V> ProcessMut for FlattenProcess<PP>
 where
   PP: ProcessMut<Value = P>,
   P:  ProcessMut<Value = V>
@@ -285,7 +285,7 @@ where
 
 /// A process calling two sub-processes before calling the next process with both returned values.
 
-/// A helper structure, used by `JoinedProcess` to synchronize the call of two processes.
+/// A helper structure, used by `JoinProcess` to synchronize the call of two processes.
 ///
 /// This version is specific to the implementaion of `Process`.
 struct JoinPoint<V1, V2, C>
@@ -314,7 +314,7 @@ where
 
 /// A process calling two sub-processes in a *synchronized* way,
 /// i.e. waiting for both to finnish running before running the given `next` continuation.
-pub struct JoinedProcess<P1, P2>
+pub struct JoinProcess<P1, P2>
 where
   P1: Process + 'static,
   P2: Process + 'static
@@ -324,7 +324,7 @@ where
 }
 
 
-impl<P1, P2> Process for JoinedProcess<P1, P2>
+impl<P1, P2> Process for JoinProcess<P1, P2>
 where
   P1: Process + 'static,
   P2: Process + 'static
@@ -336,7 +336,7 @@ where
     let join_point_2 = join_point_1.clone();
 
     self.process_1.call(runtime, move |runtime: &mut Runtime, P1_result: P1::Value| {
-      println!("Running process 1 in JoinedProcess");
+      println!("Running process 1 in JoinProcess");
       let P2_result = join_point_1.P2_result.take();
 
       if P2_result.is_some() {
@@ -350,7 +350,7 @@ where
     });
 
     self.process_2.call(runtime, move |runtime: &mut Runtime, P2_result: P2::Value| {
-      println!("Running process 2 in JoinedProcess");
+      println!("Running process 2 in JoinProcess");
       let P1_result = join_point_2.P1_result.take();
 
       if P1_result.is_some() {
@@ -368,12 +368,12 @@ where
 
 // Mutable process version below
 
-/// A helper structure, used by `JoinedProcess` to synchronize the call of two processes.
+/// A helper structure, used by `JoinProcess` to synchronize the call of two processes.
 ///
 /// This version is specific to the implementaion of `ProcessMut`.
 struct JoinPointMut<C, P1, P2, V1, V2>
 where
-  C: Continuation<(JoinedProcess<P1, P2>, (V1, V2))>,
+  C: Continuation<(JoinProcess<P1, P2>, (V1, V2))>,
   P1: ProcessMut<Value = V1>,
   P2: ProcessMut<Value = V2>
 {
@@ -387,7 +387,7 @@ where
 
 impl<C, P1, P2, V1, V2> JoinPointMut<C, P1, P2, V1, V2>
 where
-  C: Continuation<(JoinedProcess<P1, P2>, (V1, V2))> + 'static,
+  C: Continuation<(JoinProcess<P1, P2>, (V1, V2))> + 'static,
   P1: ProcessMut<Value = V1>,
   P2: ProcessMut<Value = V2>
 {
@@ -403,7 +403,7 @@ where
 }
 
 
-impl<P1, P2> ProcessMut for JoinedProcess<P1, P2>
+impl<P1, P2> ProcessMut for JoinProcess<P1, P2>
 where
   P1: ProcessMut + 'static,
   P2: ProcessMut + 'static

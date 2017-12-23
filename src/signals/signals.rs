@@ -26,40 +26,40 @@ where
   fn runtime(self) -> SignalRuntimeRef<V, E>;
 
   /// Emit the signal with the given value.
-  fn emit_value(self, value: E) -> Emit<Self, V, E> {
-    Emit { signal: Box::new(self), value: value, phantom: PhantomData }
+  fn emit_value(self, value: E) -> EmitProcess<Self, V, E> {
+    EmitProcess { signal: Box::new(self), value: value, phantom: PhantomData }
   }
 
   /// Return a process which waits for the signal to be emitted,
   /// and run on next instant if it does.
-  fn await(self) -> Await<Self, V, E>
+  fn await(self) -> AwaitProcess<Self, V, E>
   where
     Self: Sized + 'static
   {
-    Await { signal: Box::new(self), phantom: PhantomData }
+    AwaitProcess { signal: Box::new(self), phantom: PhantomData }
   }
 
   /// Return a process which waits for the signal to be emitted,
   /// and run on current instant if it does.
-  fn await_immediate(self) -> AwaitImmediate<Self, V, E>
+  fn await_immediate(self) -> AwaitImmediateProcess<Self, V, E>
   where
     Self: Sized + 'static
   {
-    AwaitImmediate { signal: Box::new(self), phantom: PhantomData }
+    AwaitImmediateProcess { signal: Box::new(self), phantom: PhantomData }
   }
 
   /// Return a process which waits for the signal to be emitted, and either:
   ///
   /// * run `process_if` on current instant if the signal is emitted;
   /// * run `process_else` on next instant if the signal is **not** emitted.
-  fn present<P1, P2, PV>(self, process_if: P1, process_else: P2) -> Present<Self, P1, P2, PV, V, E>
+  fn present<P1, P2, PV>(self, process_if: P1, process_else: P2) -> PresentProcess<Self, P1, P2, PV, V, E>
   where
     Self: Sized + 'static,
     P1: Process<Value = PV>,
     P2: Process<Value = PV>,
     V: 'static
   {
-    Present {
+    PresentProcess {
       signal      : Box::new(self),
       process_if  : process_if,
       process_else: process_else,
@@ -75,7 +75,7 @@ where
 
 /// Process awaiting for a signal to be emitted, and running during next instant if it does.
 #[derive(Clone)]
-pub struct Await<S, V, E>
+pub struct AwaitProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + Clone,
   V: Clone + 'static,
@@ -86,7 +86,7 @@ where
 }
 
 
-impl<S, V, E> Process for Await<S, V, E>
+impl<S, V, E> Process for AwaitProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + 'static,
   V: Clone + 'static,
@@ -100,7 +100,7 @@ where
 }
 
 
-impl<S, V, E> ProcessMut for Await<S, V, E>
+impl<S, V, E> ProcessMut for AwaitProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + Clone + 'static,
   V: Clone + 'static,
@@ -123,7 +123,7 @@ where
 
 /// Process awaiting for a signal to be emitted, and running during current instant if it does.
 #[derive(Clone)]
-pub struct AwaitImmediate<S, V, E>
+pub struct AwaitImmediateProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + Clone,
   V: Clone + 'static,
@@ -134,7 +134,7 @@ where
 }
 
 
-impl<S, V, E> Process for AwaitImmediate<S, V, E>
+impl<S, V, E> Process for AwaitImmediateProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + 'static,
   V: Clone + 'static,
@@ -148,7 +148,7 @@ where
 }
 
 
-impl<S, V, E> ProcessMut for AwaitImmediate<S, V, E>
+impl<S, V, E> ProcessMut for AwaitImmediateProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + Clone + 'static,
   V: Clone + 'static,
@@ -171,7 +171,7 @@ where
 
 /// Process emitting a signal with the given value.
 #[derive(Clone)]
-pub struct Emit<S, V, E>
+pub struct EmitProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + Clone,
   V: Clone + 'static,
@@ -183,7 +183,7 @@ where
 }
 
 
-impl<S, V, E> Process for Emit<S, V, E>
+impl<S, V, E> Process for EmitProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + 'static,
   V: Clone + 'static,
@@ -192,7 +192,7 @@ where
   type Value = ();
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-    //println!("Call in Emit");
+    //println!("Call in EmitProcess");
 
     self.signal.runtime().emit(runtime, self.value);
     next.call(runtime, ());
@@ -200,7 +200,7 @@ where
 }
 
 
-impl<S, V, E> ProcessMut for Emit<S, V, E>
+impl<S, V, E> ProcessMut for EmitProcess<S, V, E>
 where
   S: Signal<V, E> + Sized + Clone + 'static,
   V: Clone + 'static,
@@ -228,7 +228,7 @@ where
 /// * run `process_if` during current instant, if the signal is emitted;
 /// * run `process_else` during next instant, if the signal is **not** emitted.
 #[derive(Clone)]
-pub struct Present<S, P1, P2, PV, SV, E>
+pub struct PresentProcess<S, P1, P2, PV, SV, E>
 where
   S: Signal<SV, E> + Sized + Clone,
   P1: Process<Value = PV>,
@@ -244,7 +244,7 @@ where
 }
 
 
-impl<S, P1, P2, PV, SV, E> Process for Present<S, P1, P2, PV, SV, E>
+impl<S, P1, P2, PV, SV, E> Process for PresentProcess<S, P1, P2, PV, SV, E>
 where
   S: Signal<SV, E> + Sized + 'static,
   P1: Process<Value = PV>,
@@ -256,7 +256,7 @@ where
   type Value = PV;
 
   fn call<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<Self::Value> {
-    //println!("Call in Present");
+    //println!("Call in PresentProcess");
 
     let signal_1   = self.signal;
     let signal_2   = signal_1.clone();
@@ -281,7 +281,7 @@ where
 }
 
 
-impl<S, P1, P2, PV, SV, E> ProcessMut for Present<S, P1, P2, PV, SV, E>
+impl<S, P1, P2, PV, SV, E> ProcessMut for PresentProcess<S, P1, P2, PV, SV, E>
 where
   S: Signal<SV, E> + Sized + Clone + 'static,
   P1: ProcessMut<Value = PV>,
@@ -291,7 +291,7 @@ where
   E: Clone + 'static
 {
   fn call_mut<C>(self, runtime: &mut Runtime, next: C) where C: Continuation<(Self, Self::Value)> {
-    //println!("Call mut in Present");
+    //println!("Call mut in PresentProcess");
 
     let signal_1 = self.signal;
     let signal_2 = signal_1.clone();

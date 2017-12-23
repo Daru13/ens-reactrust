@@ -23,7 +23,7 @@ impl PureSignal {
 
   /// Emit the signal during current instant.
   /// This function is equivalent to calling `emit_value` with value `()`.
-  pub fn emit(self) -> Emit<Self, (), ()> {
+  pub fn emit(self) -> EmitProcess<Self, (), ()> {
     self.emit_value(())
   }
 }
